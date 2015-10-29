@@ -1,0 +1,391 @@
+testing/quick: Go's little-known blackbox test harness
+Go Meetup Zürich
+14 Oct 2015
+
+Matt T. Proud
+Software Engineer, Google, Inc.
+matt.proud@gmail.com
+http://matttproud.com
+@khanreaper
+
+
+* Genesis of Talk
+
+This talk is a synthesis of an article I wrote earlier this year:
+
+.link http://blog.matttproud.com/2015/06/testingquick-blackbox-testing-in-go-for.html testing/quick: Blackbox Testing in Go for Fun and Profit
+
+It also lives at the following location:
+
+.link http://mtp-present.appspot.com
+
+* Dramatis Personae (1/2)
+
+I assume you have some familiarity with testing in Go.
+
+    import "testing"
+
+If not, you have some homework:
+
+- [[https://golang.org/doc/code.html#Testing][How to Write Go Code]]
+- [[https://golang.org/pkg/testing][Venerable pkg/testing]]
+- [[http://goo.gl/1Pr0ZN][Effective, Idiomatic, and Polished Testing]]
+
+** The Usual Suspects
+
+* Dramatis Personae (2/2)
+
+This talk is about testing techniques you might not know about Go using only
+the standard library.
+
+    import "testing/quick"
+
+Namely the much unnoticed [[https://golang.org/pkg/testing/quick][pkg/testing/quick]].
+
+Familiar friend if you're coming from the Haskell world: [[http://www.eecs.northwestern.edu/~robby/courses/395-495-2009-fall/quick.pdf][QuickCheck]].
+
+** New Suspects
+
+* Pillar I: Value Generation (1/3)
+
+Did you know that Go can generate arbitrary values?
+
+    // synthesis of src/builtin/builtin.go and src/reflect/type.go:
+    type (
+    	bool 
+    	int
+    	int8
+    	// …
+    	string
+    	struct
+    )
+
+… of builtin types?
+
+* Pillar I: Value Generation (2/3)
+
+… and …
+
+.play testingquick/types.go
+
+… your own?
+
+* Pillar I: Value Generation (3/3)
+
+The meat:
+
+    func Value(t reflect.Type, rand *rand.Rand) (value reflect.Value, ok bool)
+
+* Under-the-Hood (Bonnet)
+
+White noise generation in the default case.
+
+Custom strategy if your type fulfills [[https://golang.org/pkg/testing/quick/#Generator][quick.Generator]]:
+
+.play testingquick/stooges.go /START OMIT/,/END OMIT/
+
+* Example TypeOf Literals
+
+builtin: int
+
+    reflect.TypeOf(int(0))
+
+builtin: *int
+
+    reflect.TypeOf((*int)(nil))
+
+first-class type: http.Dir
+
+    reflect.TypeOf(http.Dir(""))
+
+anonymous: struct { X, Y int }
+
+    reflect.TypeOf(struct{ X, Y int }{})
+
+anonymous: *struct { X, Y int }
+
+    reflect.TypeOf((*struct{ X, Y int })(nil))
+
+* quick.Value Limitations
+
+Legal
+
+    type point struct { X, Y int }
+
+Illegal
+
+    type point struct { x, y int }
+
+All fields (including children) must be [[https://golang.org/ref/spec#Exported_identifiers][exported identifiers]].
+
+Purely an implementation choice; nothing in the [[https://golang.org/ref/spec][specification]] prohibits this.
+
+** Exported Fields
+
+* quick.Value Limitations
+
+Appears to be artificial as opposed to substantive.
+
+Reflection supports it: [[http://golang.org/pkg/reflect/#MakeChan][reflect.MakeChan]].
+
+** Channels
+
+* quick.Value Limitations
+
+    quick.Value(reflect.TypeOf(struct{ R io.Reader }{}), rnd)
+
+A legitimate limitation:
+
+- Need to access to runtime's registry of types and find fulfilling ones à la [[https://godoc.org/golang.org/x/tools/oracle][Go Oracle]].
+- New types cannot be declared at runtime.
+- quick.Value cannot operate on nil values, and [[https://golang.org/ref/spec#The_zero_value][zero value for interfaces is nil]], precluding [[https://golang.org/pkg/reflect/#New][reflect.New]] and [[https://golang.org/pkg/reflect/#Zero][reflect.Zero]].
+
+** Interfaces
+
+* quick.Value Limitations
+
+    type Node struct {
+    	V int
+    	Next *Node
+    }
+
+Probably won't fulfill your connectivity or structural requirements out of the box:
+
+- Recursiveness
+- Cyclic
+- Completeness
+
+[[https://golang.org/pkg/testing/quick/#Generator][quick.Generator]] to the rescue!
+
+** Graph Type / Structural
+
+* quick.Value Limitations
+
+Watch out with: [[https://golang.org/pkg/unsafe/#Pointer][unsafe.Pointer]].
+
+You have no idea what it points to, its type, whether legal, etc.
+
+It is called "unsafe" for a reason.
+
+** Unsafe Pointers
+
+* quick.Value Limitations
+
+All of the previous considerations apply.
+
+- [[http://blog.golang.org/c-go-cgo][Cgo]] or [[http://www.swig.org/][SWIG-Wrapped]]
+- Code Generation (e.g., [[https://blog.golang.org/generate][go generate]] or [[https://github.com/golang/protobuf][goprotobuf]])
+- Unaudited Vendored Code
+
+Look up [[https://godoc.org/github.com/matttproud/golang_protobuf_extensions/pbtest#SanitizeGenerated][pbtest.SanitizeGenerated]] if using Protocol Buffers.
+
+** Foreign Code
+
+* Public API Design Considerations
+
+Opt not to fulfill [[https://golang.org/pkg/testing/quick/#Generator][quick.Generator]] in your public types:
+
+- Pollutes the public API
+
+- Locks users into only using your implementation
+
+Moral of the story: be absolutely sure that everyone wants your implementation.
+
+With unexported internals, go right ahead!
+
+* Pillar II: Fuzz Testing
+
+Everything in Value Generation leads up to this.
+
+The art of enforcing the invariant.
+
+* Defining an Invariant
+
+"A condition that can be relied upon to be true during execution of a program or some portion of it."
+
+Take the commutative property of addition:
+
+    a + b == b + a
+
+Could we test this in Go?  Yes, with [[https://golang.org/pkg/testing/quick/#CheckEqual][quick.CheckEqual]]!
+
+.play testingquick/commutativeadd.go /START OMIT/,/END OMIT/
+
+* Counter Examples
+
+Division is commutative—right?
+
+    a / b == b / a
+
+.play testingquick/commutativedivide.go /START OMIT/,/END OMIT/
+
+* Equality Testing with quick.CheckEqual (1/4)
+
+Let's dissect this:
+
+    func CheckEqual(f, g interface{}, config *Config) (err error)
+
+Using reflection on f and g, we attempt to find a counter example against …
+
+    ∀(x0, x1, … xn) f(x0, x1, … xn) == g(x0, x1, … xn)
+
+Expects symmetry between f and g's signatures: arguments and return values.
+
+Arguments must be generatable by [[https://golang.org/pkg/testing/quick/#Value][quick.Value]].
+
+** The Principles
+
+* Equality Testing with quick.CheckEqual (2/4)
+
+.play testingquick/bubblesort.go /START OMIT/,/END OMIT/
+
+** An Example: Whiz-Bang Sorting!
+
+* Equality Testing with quick.CheckEqual (3/4)
+
+Powered by [[https://golang.org/pkg/reflect/#DeepEqual][reflect.DeepEqual]], which means …
+
+    []T(nil) != []T{}
+
+    map[T]T(nil) != make(map[T]T)
+
+… are tripping points.
+
+Arguments to f and g are passed as the same value, so mutations in f or g to …
+
+   x0, x1, xn
+
+… are propagated from one to the other.
+
+** Caveats
+
+* Equality Testing with quick.CheckEqual (4/4)
+
+The simplest case of invariant testing.
+
+Most useful when comparing a known-good reference implementation against a proposed experimental one.
+
+** Applicability
+
+* Invariant Testing with quick.Check (1/5)
+
+Bring out the big guns with [[https://golang.org/pkg/testing/quick/#Check][quick.Check]]:
+
+    func Check(f interface{}, config *Config) (err error)
+
+Similar story to [[https://golang.org/pkg/testing/quick/#CheckEqual][quick.CheckEqual]], except that f must conform to this signature …
+
+   func f(x0, x1, … xn) (ok bool)
+
+… where ok indicates whether the invariants were upheld.
+
+Arguments are value generated just like before.
+
+** Swiss Army Knife of Fuzz Checkers
+
+* Invariant Testing with quick.Check (2/5)
+
+    func TestFoo(t *testing.T) {
+    	satisfies := func(/* arguments */) bool {
+    		// Setup Test Context
+    		// Exercise System under Test using Context and Arguments
+    		// Validate Invariants
+    		return invariantsSatisfied
+    	}
+    	if err := quick.Check(satisifies, nil); err != nil {
+    		t.Error(err)
+    	}
+    }
+
+** The Pattern
+
+* Invariant Testing with quick.Check (3/5)
+
+- End-to-End Encoder and Decoder Pipelines ([[https://github.com/matttproud/golang_protobuf_extensions/blob/d23aa0353c6500a97c053615ebd6dcb694d56cc1/pbutil/all_test.go#L289][Protocol Buffer Example]])
+
+- Testing Well-Defined Requirements for Discrete Units
+
+- Public API
+
+- Hardening for Malicious Input
+
+- Probabalistic Systems ([[https://github.com/streadway/quantile/blob/80961456624dcc2b45564b7bdf053877514ffb28/quantile_test.go#L72][Streaming Estimator Example]])
+
+- Plethora of Child Test Cases for Known Inputs and Expected Outcomes
+
+** Applicability
+
+* Invariant Testing with quick.Check (4/5)
+
+Let's turn our attention to a deterministic system: a [[https://en.wikipedia.org/wiki/Skip_list][skip list]].
+
+.play testingquick/skiplist.go /START OMIT/,/END OMIT/
+
+[[testingquick/skiplist.go][Explore this Example's Source]]
+
+** Example
+
+* Invariant Testing with quick.Check (5/5)
+
+You will likely use this within the confines of …
+
+    func TestFoo(t *testing.T) {}
+
+…, so include the *testing.T in the test's closure, so you can call …
+
+    t.Error(args ...interface{})
+    t.Errorf(format string, args ...interface{})
+
+… to provide useful context about why the input was invalid and which invariant was broken.
+
+** Good Practices
+
+* Similar Efforts (1/2)
+
+Dmitry Vyukov has authored the brilliant [[https://github.com/dvyukov/go-fuzz][go-fuzz]] tool.
+
+It is handy.  Found many bugs in Go and external libraries.
+
+[[https://golang.org/pkg/testing/quick/][pkg/testing/quick]] predates it and debuted in Go 1.0.
+
+When to use which?
+
+** Focused Fuzzing
+
+* Similar Efforts (2/2)
+
+Using [[https://golang.org/pkg/testing/quick/#Check][quick.Check]] to drive [[https://en.wikipedia.org/wiki/Infinite_monkey_theorem][monkey test]] of system under test' state transitions.
+
+.image https://docs.google.com/spreadsheets/d/1-PoLAQAHblcyNXiznZqF3ztsY4Dezi87oGmK7UoSsvM/pubchart?oid=163983617&format=image _ 430
+
+This is subject of an in-progress article that I hope to publish by EoY.
+
+** Stochastic Monkey Testing
+
+* Takeaways
+
+Do not abuse and overuse [[https://golang.org/pkg/testing/quick/][pkg/testing/quick]]; it should augment pre-existing conventions:
+
+- Designing for Testability (in the first place)
+
+- [[https://github.com/golang/go/wiki/TableDrivenTests][Table Driven Tests]]
+
+- Simple, Low-Overhead Test Cases, Suites, and Harnesses
+
+It shines when invariants can be easily computed for combinatorily large inputs.
+
+Further: I completely ignored the [[https://golang.org/pkg/testing/quick/#Config][topic of configuration]].  Read up on this if you are going to use the package.
+
+* Future Opportunities for testing/quick
+
+There is room for improvement:
+
+- Channel generation (have a changelist for this)
+
+- Useful error reporting with type generation (drafting proposal for post-Go 1)
+
+- Full representation of builtin type state space (have a changelist for this)
+
+- First-class value generation support library as opposed to white noise; [[https://golang.org/pkg/reflect/][pkg/reflect]] is a little clunky
+
+- [[https://hackage.haskell.org/package/QuickCheck-2.8.1/docs/Test-QuickCheck-Arbitrary.html][Shrinking]] for finding the smallest counter example
