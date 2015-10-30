@@ -201,7 +201,7 @@ The art of enforcing the invariant.
 
 * Defining an Invariant
 
-"A condition that can be relied upon to be true during execution of a program or some portion of it."
+"A condition that can be relied upon to be true during execution of a program or some portion of it." — [[https://en.wikipedia.org/wiki/Invariant_(computer_science)][Wikipedia]]
 
 Take the commutative property of addition:
 
@@ -243,6 +243,14 @@ Arguments must be generatable by [[https://golang.org/pkg/testing/quick/#Value][
 
 * Equality Testing with quick.CheckEqual (3/4)
 
+The simplest case of invariant testing.
+
+Most useful when comparing a known-good reference implementation against a proposed experimental one.
+
+** Applicability
+
+* Equality Testing with quick.CheckEqual (4/4)
+
 Powered by [[https://golang.org/pkg/reflect/#DeepEqual][reflect.DeepEqual]], which means …
 
     []T(nil) != []T{}
@@ -258,14 +266,6 @@ Arguments to f and g are passed as the same value, so mutations in f or g to …
 … are propagated from one to the other.
 
 ** Caveats
-
-* Equality Testing with quick.CheckEqual (4/4)
-
-The simplest case of invariant testing.
-
-Most useful when comparing a known-good reference implementation against a proposed experimental one.
-
-** Applicability
 
 * Invariant Testing with quick.Check (1/5)
 
@@ -380,11 +380,11 @@ Further: I completely ignored the [[https://golang.org/pkg/testing/quick/#Config
 
 There is room for improvement:
 
-- Channel generation (have a changelist for this)
+- Channel generation: [[https://go-review.googlesource.com/#/c/16476][cl/16476]]
 
 - Useful error reporting with type generation (drafting proposal for post-Go 1)
 
-- Full representation of builtin type state space (have a changelist for this)
+- Full representation of builtin type state space: [[https://go-review.googlesource.com/#/c/16470][cl/16470]]
 
 - First-class value generation support library as opposed to white noise; [[https://golang.org/pkg/reflect/][pkg/reflect]] is a little clunky
 
