@@ -317,7 +317,7 @@ Arguments are value generated just like before.
 
 * Invariant Testing with quick.Check (4/5)
 
-Let's turn our attention to a deterministic system: a [[https://en.wikipedia.org/wiki/Skip_list][skip list]].
+Let's turn our attention to a non-deterministic system: a [[https://en.wikipedia.org/wiki/Skip_list][skip list]].
 
 .play testingquick/skiplist.go /START OMIT/,/END OMIT/
 
